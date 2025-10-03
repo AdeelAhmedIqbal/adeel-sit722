@@ -1,16 +1,16 @@
 name: Stage 2 CD - Deploy to Staging, Test, Destroy, then deploy to Production
 
 on:
-  workflow_dispatch:
-  pull_request:
-    branches: ["testing"]
-  push:
-    branches: ["main"]
+  # Automatically trigger CD after CI workflow completes
+  workflow_run:
+    workflows: ["Full CI - Backend & Frontend (Build, Test, Push)"]
+    types:
+      - completed
 
 jobs:
   deploy_staging:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/testing'
+    if: github.event.workflow_run.conclusion == 'success' && github.ref == 'refs/heads/testing'
 
     steps:
       - name: Checkout repository
@@ -74,7 +74,7 @@ jobs:
             exit 1
           fi
 
-      # --- Inject backend IPs into the frontend bundle, rebuild & push, redeploy ---
+      # Inject backend IPs into the frontend bundle, rebuild & push, redeploy
       - name: Inject Backend IPs into Frontend main.js
         run: |
           echo "Injecting IPs into frontend/main.js"
@@ -142,14 +142,13 @@ jobs:
       
           echo "All services passed basic acceptance tests!"
       
-
       - name: Destroy Staging
         if: always()
         run: kubectl delete namespace staging
 
   deploy_production:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event.workflow_run.conclusion == 'success' && github.ref == 'refs/heads/main'
 
     steps:
       - name: Checkout repository
@@ -166,13 +165,76 @@ jobs:
           resource-group: deakinuni
           cluster-name: adeelaks
 
-      - name: Deploy to Production (Permanent Namespace)
+      - name: Create Production Namespace
+        run: kubectl create namespace production || true
+
+      - name: Deploy Production Infrastructure
         run: |
-          kubectl create namespace production || true
           kubectl apply -n production -f k8s/configmaps.yaml
           kubectl apply -n production -f k8s/secrets.yaml
           kubectl apply -n production -f k8s/product-db.yaml
           kubectl apply -n production -f k8s/order-db.yaml
+          kubectl apply -n production -f k8s/customer-db.yaml
+
+      - name: Deploy Staging Services
+        run: |
           kubectl apply -n production -f k8s/product-service.yaml
           kubectl apply -n production -f k8s/order-service.yaml
+          kubectl apply -n production -f k8s/customer-service.yaml
           kubectl apply -n production -f k8s/frontend.yaml
+
+      
+      - name: Wait for LoadBalancer IPs (product, order, and customer)
+        id: ips
+        run: |
+          echo "Waiting for product/order/customer LB IPs..."
+          success=false
+          for i in {1..60}; do
+            PRODUCT_IP=$(kubectl get svc product-service -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            ORDER_IP=$(kubectl get svc order-service   -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            CUSTOMER_IP=$(kubectl get svc customer-service -n production -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            
+            if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" && -n "$CUSTOMER_IP" ]]; then
+              echo "product_ip=$PRODUCT_IP" >> $GITHUB_OUTPUT
+              echo "order_ip=$ORDER_IP"     >> $GITHUB_OUTPUT
+              echo "customer_ip=$CUSTOMER_IP" >> $GITHUB_OUTPUT
+              echo "Product: $PRODUCT_IP, Order: $ORDER_IP, Customer: $CUSTOMER_IP"
+              success=true
+              break
+            fi
+            echo "Waiting for services... attempt $i/60"
+            sleep 5
+          done
+          
+          if [[ "$success" != "true" ]]; then
+            echo "IPs not ready after timeout"
+            exit 1
+          fi
+
+      # Inject backend IPs into the frontend bundle, rebuild & push, redeploy
+      - name: Inject Backend IPs into Frontend main.js
+        run: |
+          echo "Injecting IPs into frontend/main.js"
+          sed -i "s|_PRODUCT_API_URL_|http://${{ steps.ips.outputs.product_ip }}:8000|g" frontend/main.js
+          sed -i "s|_ORDER_API_URL_|http://${{ steps.ips.outputs.order_ip }}:8001|g" frontend/main.js
+          sed -i "s|_CUSTOMER_API_URL_|http://${{ steps.ips.outputs.customer_ip }}:8002|g" frontend/main.js
+          echo "--- Modified main.js ---"
+          cat frontend/main.js
+          echo "------------------------"
+
+      - name: ACR Login
+        run: az acr login --name ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+
+      - name: Set IMAGE_TAG
+        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+        # this will use the first 7 chars of commit SHA as the tag
+
+      - name: Build and Push Frontend Image
+        run: |
+          docker build -t ${{ secrets.AZURE_CONTAINER_REGISTRY }}/frontend:${IMAGE_TAG} ./frontend/
+          docker push ${{ secrets.AZURE_CONTAINER_REGISTRY }}/frontend:${IMAGE_TAG}
+
+      - name: Rollout updated Frontend in Staging
+        run: |
+          kubectl set image deployment/frontend frontend-container=${{ secrets.AZURE_CONTAINER_REGISTRY }}/frontend:${IMAGE_TAG} -n production
+          kubectl rollout status deployment/frontend -n production --timeout=180s
