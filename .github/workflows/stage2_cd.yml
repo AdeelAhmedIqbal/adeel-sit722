@@ -95,7 +95,7 @@ jobs:
 
       - name: Rollout updated Frontend in Staging
         run: |
-          kubectl set image deployment/frontend frontend=${{ secrets.AZURE_CONTAINER_REGISTRY }}/frontend:latest -n staging
+          kubectl set image deployment/frontend frontend-container=${{ secrets.AZURE_CONTAINER_REGISTRY }}/frontend:latest -n staging
           kubectl rollout status deployment/frontend -n staging --timeout=180s
 
       # Optional smoke test & teardown
