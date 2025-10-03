@@ -101,24 +101,47 @@ jobs:
         run: |
           kubectl set image deployment/frontend frontend-container=${{ secrets.AZURE_CONTAINER_REGISTRY }}/frontend:${IMAGE_TAG} -n staging
           kubectl rollout status deployment/frontend -n staging --timeout=180s
+      
       - name: Run Basic Acceptance Tests on Staging
         run: |
           echo "Running basic acceptance tests..."
+      
           PRODUCT_IP=$(kubectl get svc product-service -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           ORDER_IP=$(kubectl get svc order-service -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           CUSTOMER_IP=$(kubectl get svc customer-service -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
           FRONTEND_IP=$(kubectl get svc frontend -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-
+      
+          # Function to wait for service availability
+          wait_for_service () {
+            local url=$1
+            local name=$2
+            echo "Waiting for $name at $url ..."
+            for i in {1..30}; do
+              if curl -sf $url > /dev/null; then
+                echo "$name is reachable!"
+                return 0
+              fi
+              echo "Attempt $i: $name not ready yet..."
+              sleep 10
+            done
+            echo "$name did not become ready in time"
+            exit 1
+          }
+      
           # Test product service
-          curl -f http://$PRODUCT_IP:8000/ || exit 1
-          # Test order service health
-          curl -f http://$ORDER_IP:8001/ || exit 1
-          # Test customer service health
-          curl -f http://$CUSTOMER_IP:8002/ || exit 1
-          # Test frontend HTML response
-          curl -f http://$FRONTEND_IP/ || exit 1
-
-          echo "All services passed acceptance tests!"
+          wait_for_service "http://$PRODUCT_IP:8000/" "Product Service"
+      
+          # Test order service
+          wait_for_service "http://$ORDER_IP:8001/" "Order Service"
+      
+          # Test customer service
+          wait_for_service "http://$CUSTOMER_IP:8002/" "Customer Service"
+      
+          # Test frontend
+          wait_for_service "http://$FRONTEND_IP/" "Frontend"
+      
+          echo "All services passed basic acceptance tests!"
+      
 
       - name: Destroy Staging
         if: always()
