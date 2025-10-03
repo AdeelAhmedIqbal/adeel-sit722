@@ -37,29 +37,34 @@ jobs:
           kubectl apply -n staging -f k8s/secrets.yaml
           kubectl apply -n staging -f k8s/product-db.yaml
           kubectl apply -n staging -f k8s/order-db.yaml
+          kubectl apply -n staging -f k8s/customer-db.yaml
 
       - name: Deploy Staging Services
         run: |
           kubectl apply -n staging -f k8s/product-service.yaml
           kubectl apply -n staging -f k8s/order-service.yaml
+          kubectl apply -n staging -f k8s/customer-service.yaml
           kubectl apply -n staging -f k8s/frontend.yaml
 
-      - name: Wait for LoadBalancer IPs (product & order)
+      
+      - name: Wait for LoadBalancer IPs (product, order, and customer)
         id: ips
         run: |
           echo "Waiting for product/order LB IPs..."
           for i in {1..60}; do
             PRODUCT_IP=$(kubectl get svc product-service -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
             ORDER_IP=$(kubectl get svc order-service   -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-            if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" ]]; then
+            CUSTOMER_IP=$(kubectl get svc customer-service -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" && -n "$CUSTOMER_IP" ]]; then
               echo "product_ip=$PRODUCT_IP" >> $GITHUB_OUTPUT
               echo "order_ip=$ORDER_IP"     >> $GITHUB_OUTPUT
-              echo "Product: $PRODUCT_IP, Order: $ORDER_IP"
+              echo "customer_ip=$CUSTOMER_IP" >> $GITHUB_OUTPUT
+              echo "Product: $PRODUCT_IP, Order: $ORDER_IP, Customer: $CUSTOMER_IP"
               break
             fi
             sleep 5
           done
-          [[ -z "${PRODUCT_IP}" || -z "${ORDER_IP}" ]] && echo "IPs not ready" && exit 1
+          [[ -z "${PRODUCT_IP}" || -z "${ORDER_IP}" || -z "${CUSTOMER_IP}" ]] && echo "IPs not ready" && exit 1
 
       # --- Inject backend IPs into the frontend bundle, rebuild & push, redeploy ---
       - name: Inject Backend IPs into Frontend main.js
@@ -67,6 +72,7 @@ jobs:
           echo "Injecting IPs into frontend/main.js"
           sed -i "s|_PRODUCT_API_URL_|http://${{ steps.ips.outputs.product_ip }}|g" frontend/main.js
           sed -i "s|_ORDER_API_URL_|http://${{ steps.ips.outputs.order_ip }}|g"     frontend/main.js
+          sed -i "s|_CUSTOMER_API_URL_|http://${{ steps.ips.outputs.customer_ip }}|g" frontend/main.js
           echo "--- Modified main.js ---"
           cat frontend/main.js
           echo "------------------------"
