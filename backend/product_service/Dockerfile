@@ -1,4 +1,5 @@
 # /backend/product_service/Dockerfile
+# test both stage 1 and stage 2 pipeline
 
 FROM python:3.10-slim-buster
 
