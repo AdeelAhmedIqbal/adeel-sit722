@@ -95,8 +95,8 @@ jobs:
 
       - name: Rollout updated Frontend in Staging
         run: |
-          kubectl set image deployment/frontend-w08e1 frontend=${{ secrets.AZURE_CONTAINER_REGISTRY }}/frontend:latest -n staging
-          kubectl rollout status deployment/frontend-w08e1 -n staging --timeout=180s
+          kubectl set image deployment/frontend frontend=${{ secrets.AZURE_CONTAINER_REGISTRY }}/frontend:latest -n staging
+          kubectl rollout status deployment/frontend -n staging --timeout=180s
 
       # Optional smoke test & teardown
       # - name: Acceptance Test (Smoke)
