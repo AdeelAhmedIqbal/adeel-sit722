@@ -6,7 +6,10 @@ on:
     workflows: ["Full CI - Backend & Frontend (Build, Test, Push)"]
     types:
       - completed
-
+  # Trigger production deployment when code is merged into main
+  push:
+    branches:
+      - main
 jobs:
   deploy_staging:
     runs-on: ubuntu-latest
