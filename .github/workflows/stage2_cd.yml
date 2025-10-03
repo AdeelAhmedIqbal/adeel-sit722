@@ -78,9 +78,9 @@ jobs:
       - name: Inject Backend IPs into Frontend main.js
         run: |
           echo "Injecting IPs into frontend/main.js"
-          sed -i "s|_PRODUCT_API_URL_|http://${{ steps.ips.outputs.product_ip }}|g" frontend/main.js
-          sed -i "s|_ORDER_API_URL_|http://${{ steps.ips.outputs.order_ip }}|g"     frontend/main.js
-          sed -i "s|_CUSTOMER_API_URL_|http://${{ steps.ips.outputs.customer_ip }}|g" frontend/main.js
+          sed -i "s|_PRODUCT_API_URL_|http://${{ steps.ips.outputs.product_ip }}:8000|g" frontend/main.js
+          sed -i "s|_ORDER_API_URL_|http://${{ steps.ips.outputs.order_ip }}:8001|g" frontend/main.js
+          sed -i "s|_CUSTOMER_API_URL_|http://${{ steps.ips.outputs.customer_ip }}:8002|g" frontend/main.js
           echo "--- Modified main.js ---"
           cat frontend/main.js
           echo "------------------------"
