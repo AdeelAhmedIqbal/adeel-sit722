@@ -50,21 +50,29 @@ jobs:
       - name: Wait for LoadBalancer IPs (product, order, and customer)
         id: ips
         run: |
-          echo "Waiting for product/order LB IPs..."
+          echo "Waiting for product/order/customer LB IPs..."
+          success=false
           for i in {1..60}; do
             PRODUCT_IP=$(kubectl get svc product-service -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
             ORDER_IP=$(kubectl get svc order-service   -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
             CUSTOMER_IP=$(kubectl get svc customer-service -n staging -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            
             if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" && -n "$CUSTOMER_IP" ]]; then
               echo "product_ip=$PRODUCT_IP" >> $GITHUB_OUTPUT
               echo "order_ip=$ORDER_IP"     >> $GITHUB_OUTPUT
               echo "customer_ip=$CUSTOMER_IP" >> $GITHUB_OUTPUT
               echo "Product: $PRODUCT_IP, Order: $ORDER_IP, Customer: $CUSTOMER_IP"
+              success=true
               break
             fi
+            echo "Waiting for services... attempt $i/60"
             sleep 5
           done
-          [[ -z "${PRODUCT_IP}" || -z "${ORDER_IP}" || -z "${CUSTOMER_IP}" ]] && echo "IPs not ready" && exit 1
+          
+          if [[ "$success" != "true" ]]; then
+            echo "IPs not ready after timeout"
+            exit 1
+          fi
 
       # --- Inject backend IPs into the frontend bundle, rebuild & push, redeploy ---
       - name: Inject Backend IPs into Frontend main.js
